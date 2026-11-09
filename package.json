@@ -1,0 +1,38 @@
+{
+  "name": "hairline-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A visual editor for isometric line figures that answer the pointer. Exports one dependency-free HTML file.",
+  "license": "MIT",
+  "author": "zuppdev",
+  "homepage": "https://zuppdev.github.io/hairline-studio/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zuppdev/hairline-studio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zuppdev/hairline-studio/issues"
+  },
+  "keywords": [
+    "isometric",
+    "svg",
+    "line-art",
+    "editor",
+    "animation",
+    "interactive",
+    "no-build"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "playwright test",
+    "examples": "node scripts/build-examples.mjs",
+    "check:examples": "node scripts/build-examples.mjs --check"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

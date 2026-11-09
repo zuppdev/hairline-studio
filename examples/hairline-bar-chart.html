@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bar-chart · hairline</title>
+<style>
+:root{--bg:#f4f4f2;--fg:#1d1d20;--muted:#76767e;--line:#d9d9dc;--hl-plate:#fbfbf9;--hl-hi:#0e0f12;--hl-edge:#3a3b42;--hl-mid:#8b8c95;--hl-lo:#d7d8dc;--hl-stroke:0.9;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0b0b0e;--fg:#ececef;--muted:#8a8a93;--line:#26262b;--hl-plate:#101014;--hl-hi:#fafafa;--hl-edge:#a1a1aa;--hl-mid:#52525b;--hl-lo:#27272a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b0b0e;--fg:#ececef;--muted:#8a8a93;--line:#26262b;--hl-plate:#101014;--hl-hi:#fafafa;--hl-edge:#a1a1aa;--hl-mid:#52525b;--hl-lo:#27272a;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--fg);font:14px/1.4 ui-sans-serif,system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px 16px}
+main{width:100%;max-width:760px;display:flex;flex-direction:column;gap:14px}
+.fig{width:100%;aspect-ratio:5/4;background:var(--hl-plate);border:1px solid var(--line);border-radius:12px;overflow:hidden}.fig svg{width:100%;height:100%;display:block;touch-action:none}
+.bar{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center;color:var(--muted)}.bar label{display:flex;gap:8px;align-items:center;flex:1;min-width:200px}.bar input{flex:1}
+button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}button:hover{border-color:var(--muted)}
+h1{font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<main>
+<h1>bar-chart</h1>
+<div class="fig"><svg id="figure" role="img" aria-label="bar-chart, an interactive line figure"></svg></div>
+<div class="bar"><label>Intensity <input type="range" id="intensity" min="0" max="1" step="0.01" value="0.60"></label><button id="theme">Theme: auto</button><button id="play">Play</button></div>
+</main>
+<script>
+var FIGURE = {"name":"bar-chart","plate":true,"motion":{"pick":"across","effect":"grow","amount":1.6,"reach":2.4,"move":"spring","stiff":0.08,"bounce":0.6,"ripple":70},"parts":[{"kind":"box","x":0,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12},{"kind":"box","x":1,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12},{"kind":"box","x":2,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12},{"kind":"box","x":3,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12},{"kind":"box","x":4,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12},{"kind":"box","x":5,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12},{"kind":"box","x":6,"y":0,"z":0,"w":0.7,"d":0.7,"h":0.12}]};
+function hairlineMount(svg, fig, opts){
+  opts = opts || {};
+  var NS = 'http://www.w3.org/2000/svg', C = 0.8660254, S = 40;
+  var st = {fig: fig, I: opts.intensity == null ? 0.6 : opts.intensity, mode: opts.mode || 'play', ptr: null, sel: -1,
+    hist: [], tour: null, sims: [], els: [], rest: [], rank: [], plate: null, span: [0, 1], vb: [0, 0, 1, 1],
+    acc: 0, last: 0, dirty: true, drawn: [], zord: []};
+  var STEP = 1000 / 60;
+  var reduce = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function P(x, y, z){ return [(x - y) * C * S, (x + y) * 0.5 * S - z * S]; }
+  function pts(a){ var s = ''; for (var i = 0; i < a.length; i++){ var p = P(a[i][0], a[i][1], a[i][2]); s += (i ? ' ' : '') + p[0].toFixed(1) + ',' + p[1].toFixed(1); } return s; }
+  function mk(tag, parent){ var e = document.createElementNS(NS, tag); parent.appendChild(e); return e; }
+  function amtFor(I){ return st.fig.motion.amount * (0.3 + 1.4 * I); }
+  function shape(p, a){
+    var e = st.fig.motion.effect, g = {x: p.x, y: p.y, z: p.z, w: p.w, d: p.d, h: p.h};
+    if (e === 'lift') g.z += a; else if (e === 'sink') g.h = Math.max(0.04, p.h - a);
+    else if (e === 'slideY') g.y += a; else if (e === 'slideX') g.x += a; else if (e === 'grow') g.h = p.h + Math.max(-p.h + 0.04, a);
+    return g;
+  }
+  function corners(g){ var o = []; [0, 1].forEach(function(i){ [0, 1].forEach(function(j){ [0, 1].forEach(function(k){ o.push(P(g.x + i * g.w, g.y + j * g.d, g.z + k * g.h)); }); }); }); return o; }
+  function plateGeom(){
+    var ps = st.fig.parts; if (!ps.length || !st.fig.plate) return null;
+    var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, z0 = 1e9;
+    ps.forEach(function(p){ x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.d); z0 = Math.min(z0, p.z); });
+    var m = 0.55; return {x: x0 - m, y: y0 - m, z: z0 - 0.16, w: x1 - x0 + 2 * m, d: y1 - y0 + 2 * m, h: 0.16};
+  }
+  function boxEls(g){ return {top: mk('polygon', g), front: mk('polygon', g), right: mk('polygon', g)}; }
+  function drawBox(f, g){
+    var x = g.x, y = g.y, z = g.z, w = g.w, d = g.d, t = g.z + g.h;
+    f.top.setAttribute('points', pts([[x, y, t], [x + w, y, t], [x + w, y + d, t], [x, y + d, t]]));
+    f.front.setAttribute('points', pts([[x, y + d, z], [x + w, y + d, z], [x + w, y + d, t], [x, y + d, t]]));
+    f.right.setAttribute('points', pts([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, t], [x + w, y, t]]));
+  }
+  function drawCyl(f, g){
+    var r = Math.min(g.w, g.d) / 2, cx = g.x + g.w / 2, cy = g.y + g.d / 2;
+    var b = P(cx, cy, g.z), t = P(cx, cy, g.z + g.h), rx = 1.2247 * r * S, ry = 0.7071 * r * S;
+    f.body.setAttribute('d', 'M' + (b[0] - rx).toFixed(1) + ' ' + b[1].toFixed(1) + 'L' + (t[0] - rx).toFixed(1) + ' ' + t[1].toFixed(1) +
+      'L' + (t[0] + rx).toFixed(1) + ' ' + t[1].toFixed(1) + 'L' + (b[0] + rx).toFixed(1) + ' ' + b[1].toFixed(1) +
+      'A' + rx.toFixed(1) + ' ' + ry.toFixed(1) + ' 0 0 1 ' + (b[0] - rx).toFixed(1) + ' ' + b[1].toFixed(1) + 'Z');
+    f.cap.setAttribute('cx', t[0].toFixed(1)); f.cap.setAttribute('cy', t[1].toFixed(1));
+    f.cap.setAttribute('rx', rx.toFixed(1)); f.cap.setAttribute('ry', ry.toFixed(1));
+  }
+  function fit(){
+    var xs = [], ys = [], amax = amtFor(1);
+    st.fig.parts.forEach(function(p){ corners(shape(p, 0)).concat(corners(shape(p, amax))).forEach(function(c){ xs.push(c[0]); ys.push(c[1]); }); });
+    if (st.plate) corners(st.plate).forEach(function(c){ xs.push(c[0]); ys.push(c[1]); });
+    if (!xs.length){ xs = [-100, 100]; ys = [-80, 80]; }
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    var w = x1 - x0, h = y1 - y0, pad = Math.max(30, Math.max(w, h) * 0.08);
+    w += pad * 2; h += pad * 2; var ar = 5 / 4;
+    if (w / h < ar){ var nw = h * ar; x0 -= (nw - w) / 2; w = nw; } else { var nh = w / ar; y0 -= (nh - h) / 2; h = nh; }
+    st.vb = [x0 - pad, y0 - pad, w, h];
+    svg.setAttribute('viewBox', st.vb.map(function(v){ return v.toFixed(1); }).join(' '));
+  }
+  function build(keepView){
+    svg.textContent = '';
+    st.dirty = true; st.zord = []; st.drawn = [];
+    svg.classList.add('hl-svg');
+    var css = mk('style', svg);
+    css.textContent = '.hl-svg polygon,.hl-svg path,.hl-svg ellipse{fill:var(--hl-plate);stroke:var(--hl-mid);stroke-width:var(--hl-stroke,0.9);vector-effect:non-scaling-stroke;stroke-linejoin:round}' +
+      '.hl-svg .plate polygon{stroke:var(--hl-edge)}.hl-svg .on polygon,.hl-svg .on path,.hl-svg .on ellipse{stroke:var(--hl-hi)}' +
+      '.hl-svg .sel polygon,.hl-svg .sel path,.hl-svg .sel ellipse{stroke:var(--hl-sel,currentColor);stroke-width:1.6}.hl-svg [data-i]{cursor:' + (st.mode === 'edit' ? 'grab' : 'default') + '}';
+    st.plate = plateGeom();
+    if (st.plate){ var pg = mk('g', svg); pg.setAttribute('class', 'plate'); drawBox(boxEls(pg), st.plate); }
+    var layer = mk('g', svg); st.layer = layer;
+    st.els = st.fig.parts.map(function(p, i){
+      var g = mk('g', layer); g.setAttribute('data-i', i);
+      var f = p.kind === 'cyl' ? {body: mk('path', g), cap: mk('ellipse', g)} : boxEls(g);
+      return {g: g, f: f, kind: p.kind};
+    });
+    while (st.sims.length < st.fig.parts.length) st.sims.push({h: 0, v: 0});
+    st.sims.length = st.fig.parts.length;
+    st.rest = st.fig.parts.map(function(p){ return P(p.x + p.w / 2, p.y + p.d / 2, p.z + p.h); });
+    var pick = st.fig.motion.pick, axis = pick === 'across' ? 0 : 1;
+    var moving = st.rest.map(function(_, i){ return i; }).filter(function(i){ return !st.fig.parts[i].still; });
+    var order = moving.slice().sort(function(a, b){ return st.rest[a][axis] - st.rest[b][axis]; });
+    st.rank = []; order.forEach(function(idx, r){ st.rank[idx] = r; });
+    st.order = order; st.moving = moving;
+    var vals = order.map(function(i){ return st.rest[i][axis]; });
+    st.span = vals.length ? [Math.min.apply(null, vals), Math.max.apply(null, vals)] : [0, 1];
+    if (!keepView || !svg.getAttribute('viewBox')) fit();
+  }
+  function dist(i, p){
+    if (!p || st.fig.parts[i].still) return null;
+    var pick = st.fig.motion.pick, n = st.order.length;
+    if (pick === 'pointer') return Math.hypot(p.x - st.rest[i][0], p.y - st.rest[i][1]) / S;
+    var v = pick === 'across' ? p.x : p.y, lo = st.span[0], hi = st.span[1];
+    var f = n < 2 || hi - lo < 1 ? 0 : (v - lo) / (hi - lo) * (n - 1);
+    f = Math.max(-0.4, Math.min(n - 0.6, f));
+    return Math.abs(st.rank[i] - f);
+  }
+  function fall(d){
+    if (d == null) return 0;
+    var core = 0.4, r = Math.max(0.05, st.fig.motion.reach);
+    if (d <= core) return 1;
+    var v = Math.max(0, 1 - (d - core) / r); return v * v;
+  }
+  function sample(t){ for (var k = st.hist.length - 1; k >= 0; k--){ if (st.hist[k].t <= t) return st.hist[k].p; } return st.hist.length ? st.hist[0].p : null; }
+  function toVB(e){
+    var pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    var m = svg.getScreenCTM(); if (!m) return null; var q = pt.matrixTransform(m.inverse()); return {x: q.x, y: q.y};
+  }
+  svg.addEventListener('pointermove', function(e){ if (!st.tour) st.ptr = toVB(e); });
+  svg.addEventListener('pointerleave', function(){ if (!st.tour) st.ptr = null; });
+  svg.addEventListener('pointerdown', function(e){
+    if (st.mode !== 'edit') { if (!st.tour) st.ptr = toVB(e); return; }
+    var g = e.target.closest ? e.target.closest('[data-i]') : null;
+    if (opts.onPick) opts.onPick(g ? +g.getAttribute('data-i') : -1, e);
+  });
+  function tourPtr(now){
+    // The tour clock starts at the first frame it sees: frame timestamps can run behind performance.now().
+    var T = st.tour; if (T.t0 == null) T.t0 = now;
+    var stops = T.stops, per = 950, move = 420, el = Math.max(0, now - T.t0), i = Math.floor(el / per);
+    if (i >= stops.length){ if (el > stops.length * per + 500){ st.tour = null; st.ptr = null; if (opts.onTourEnd) opts.onTourEnd(); } else st.ptr = null; return; }
+    var to = stops[i], from = i ? stops[i - 1] : to, u = Math.min(1, (el - i * per) / move);
+    u = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    st.ptr = {x: from[0] + (to[0] - from[0]) * u, y: from[1] + (to[1] - from[1]) * u};
+  }
+  // Depth order. The viewer sits toward +x, +y, +z, so of two boxes split by a plane on any axis,
+  // the one on the low side is behind. Only pairs whose screen hexagons overlap need an order;
+  // their projections are compared on the three hexagon axes (x - y, z - y, z - x).
+  function hex(g){ return [g.x - g.y - g.d, g.x + g.w - g.y, g.z - g.y - g.d, g.z + g.h - g.y, g.z - g.x - g.w, g.z + g.h - g.x]; }
+  function meets(a, b){ var e = 1e-6; return a[0] < b[1] - e && b[0] < a[1] - e && a[2] < b[3] - e && b[2] < a[3] - e && a[4] < b[5] - e && b[4] < a[5] - e; }
+  function behind(A, B){
+    var e = 1e-6;
+    if (A.x + A.w <= B.x + e) return -1; if (B.x + B.w <= A.x + e) return 1;
+    if (A.y + A.d <= B.y + e) return -1; if (B.y + B.d <= A.y + e) return 1;
+    if (A.z + A.h <= B.z + e) return -1; if (B.z + B.h <= A.z + e) return 1;
+    return 0;
+  }
+  function depthOrder(geo){
+    var n = geo.length, i, j, hx = [], deps = [], key = [], base = [], mark = [], out = [];
+    for (i = 0; i < n; i++){ var g = geo[i]; hx.push(hex(g)); deps.push([]); base.push(i); key.push(g.x + g.w / 2 + g.y + g.d / 2 + g.z + g.h / 2); }
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++){
+      if (!meets(hx[i], hx[j])) continue;
+      var r = behind(geo[i], geo[j]) || (key[i] <= key[j] ? -1 : 1);
+      if (r < 0) deps[j].push(i); else deps[i].push(j);
+    }
+    base.sort(function(a, b){ return key[a] - key[b] || a - b; });
+    function visit(k){ if (mark[k]) return; mark[k] = 1; for (var q = 0; q < deps[k].length; q++) visit(deps[k][q]); out.push(k); }
+    for (i = 0; i < n; i++) visit(base[i]);
+    return out;
+  }
+  // Motion runs on a fixed 60 Hz step so springs feel the same on 60, 120 and 144 Hz screens.
+  function frame(now){
+    if (!st.alive) return;
+    if (st.tour) tourPtr(now);
+    st.hist.push({t: now, p: st.ptr});
+    while (st.hist.length > 2 && st.hist[0].t < now - 2000) st.hist.shift();
+    var m = st.fig.motion, amt = amtFor(st.I), move = reduce && m.move === 'spring' ? 'ease' : m.move;
+    var n = st.fig.parts.length, i, k, targets = [];
+    for (i = 0; i < n; i++){
+      var t = 0;
+      if (st.mode !== 'edit'){
+        var d0 = dist(i, st.ptr), delay = m.ripple > 0 && d0 != null ? d0 * m.ripple : 0;
+        t = fall(dist(i, delay ? sample(now - delay) : st.ptr));
+      }
+      targets.push(t);
+    }
+    st.acc = Math.min(st.acc + (st.last ? Math.max(0, now - st.last) : STEP), 6 * STEP); st.last = now;
+    if (st.mode === 'edit' || move === 'snap'){
+      for (i = 0; i < n; i++){ st.sims[i].h = targets[i]; st.sims[i].v = 0; }
+      st.acc = 0;
+    } else {
+      while (st.acc >= STEP - 1e-6){
+        st.acc -= STEP;
+        for (i = 0; i < n; i++){
+          var s = st.sims[i];
+          if (move === 'ease'){ s.h += (targets[i] - s.h) * 0.16; s.v = 0; }
+          else { s.v += (targets[i] - s.h) * m.stiff; s.v *= (1 - (1 - m.bounce) * 0.5); s.h += s.v; }
+        }
+      }
+    }
+    var dirty = st.dirty;
+    for (i = 0; i < n && !dirty; i++) if (st.drawn[i] === undefined || Math.abs(st.sims[i].h - st.drawn[i]) > 5e-4) dirty = true;
+    if (dirty){
+      var geo = [];
+      for (i = 0; i < n; i++){ geo.push(shape(st.fig.parts[i], st.sims[i].h * amt)); st.drawn[i] = st.sims[i].h; }
+      var ord = depthOrder(geo), same = ord.length === st.zord.length;
+      for (k = 0; k < ord.length; k++){
+        i = ord[k]; var E = st.els[i]; if (!E) continue;
+        if (E.kind === 'cyl') drawCyl(E.f, geo[i]); else drawBox(E.f, geo[i]);
+        var cls = (st.mode !== 'edit' && st.sims[i].h > 0.4 ? 'on' : '') + (i === st.sel ? ' sel' : '');
+        if (E.g.getAttribute('class') !== cls) E.g.setAttribute('class', cls);
+        if (same && st.zord[k] !== i) same = false;
+      }
+      if (!same){ for (k = 0; k < ord.length; k++) if (st.els[ord[k]]) st.layer.appendChild(st.els[ord[k]].g); st.zord = ord; }
+      st.dirty = false;
+    }
+    requestAnimationFrame(frame);
+  }
+  st.alive = true;
+  build();
+  requestAnimationFrame(frame);
+  return {
+    update: function(f, keepView){ st.fig = f; build(keepView); },
+    setMode: function(mo){ st.mode = mo; st.tour = null; build(); },
+    setIntensity: function(v){ st.I = v; st.dirty = true; },
+    setSelected: function(i){ st.sel = i; st.dirty = true; },
+    tour: function(){
+      var stops = (st.fig.motion.pick === 'pointer' ? st.moving : st.order).map(function(i){ return st.rest[i]; });
+      if (!stops.length) return false;
+      st.tour = {stops: stops, t0: null}; return true;
+    },
+    stopTour: function(){ st.tour = null; st.ptr = null; },
+    touring: function(){ return !!st.tour; },
+    toVB: toVB,
+    order: function(){ return st.zord.slice(); },
+    unit: S,
+    destroy: function(){ st.alive = false; }
+  };
+}
+var fig = hairlineMount(document.getElementById("figure"), FIGURE, {intensity: 0.60, onTourEnd: function(){ document.getElementById("play").textContent = "Play"; }});
+document.getElementById("intensity").addEventListener("input", function(e){ fig.setIntensity(parseFloat(e.target.value)); });
+var themes = ["auto", "light", "dark"], ti = 0;
+document.getElementById("theme").addEventListener("click", function(e){ ti = (ti + 1) % 3; if (themes[ti] === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", themes[ti]); e.target.textContent = "Theme: " + themes[ti]; });
+document.getElementById("play").addEventListener("click", function(e){ if (fig.touring()){ fig.stopTour(); e.target.textContent = "Play"; } else if (fig.tour()) e.target.textContent = "Stop"; });
+</script>
+</body>
+</html>

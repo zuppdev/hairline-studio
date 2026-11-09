@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in the studio or an exported file does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a problem. Please do not report security issues here; see the security policy instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Describe the problem. Screenshots or a screen recording help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start from the Drawers preset
+        2. Switch to Edit
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - The studio
+        - An exported HTML file
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and operating system
+      placeholder: Firefox 140 on Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: figure
+    attributes:
+      label: Figure file
+      description: If the problem depends on a figure, attach the .hairline.json file from Save (rename it to .txt if GitHub refuses it).
