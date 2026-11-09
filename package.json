@@ -33,6 +33,6 @@
     "check:examples": "node scripts/build-examples.mjs --check"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.1"
+    "@playwright/test": "1.65.0"
   }
 }
